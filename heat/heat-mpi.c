@@ -12,6 +12,10 @@ void usage( char *s )
     fprintf(stderr, "Usage: %s <input file> [result file]\n\n", s);
 }
 
+int distribute_rows (int mpi_id, int mpi_ranks, int rows) {
+    return (rows/mpi_ranks) * ((rows % mpi_ranks) > mpi_id);
+}
+
 int main( int argc, char *argv[] )
 {
     int columns, rows;
@@ -80,19 +84,19 @@ int main( int argc, char *argv[] )
         columns = param.resolution + 2;
         rows = columns;
 
+
         // starting time
         runtime = wtime();
 
         // send to workers the necessary information to perform computation
-        for (int i=0; i<numprocs; i++) {
-            if (i>0) {
-                MPI_Send(&maxiter, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
-                MPI_Send(&columns, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
-                MPI_Send(&param.u[0], rows*columns, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
-                MPI_Send(&param.uhelp[0], rows*columns, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
-            }
+        for (int i=1; i<numprocs; i++) {
+                int sent_rows = distribute_rows(i, numprocs, param.resolution) + 2;
+                MPI_Send(&maxiter, 1, MPI_INT, i, 0, MPI_COMM_WORLD); // broadcast?
+                MPI_Send(&columns, 1, MPI_INT, i, 0, MPI_COMM_WORLD); // broadcast?
+                MPI_Send(&sent_rows, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+                MPI_Send(&param.u[i * sent_rows], sent_rows*columns, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
+                MPI_Send(&param.uhelp[i * sent_rows], sent_rows*columns, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
         }
-
         iter = 0;
         while(1) {
             residual = relax_jacobi(param.u, param.uhelp, rows, columns);
@@ -107,6 +111,19 @@ int main( int argc, char *argv[] )
             // max. iteration reached ? (no limit with maxiter=0)
             if (maxiter>0 && iter>=maxiter) break;
         }
+        // receive information
+        MPI_Request merge_req[numprocs-1];
+        for (int i = 1; i < numprocs; i++) {
+            int sent_rows = distribute_rows(i, numprocs, param.resolution) + 2;
+
+            MPI_Irecv(&param.u[i * sent_rows], sent_rows * columns, MPI_DOUBLE, i, 1, MPI_COMM_WORLD, &merge_req[i-1]);
+        }
+
+        for (int i = 0; i < numprocs - 1; i++)
+            MPI_Wait(&merge_req[i], MPI_STATUS_IGNORE);
+
+
+
 
         // stopping time
         runtime = wtime() - runtime;
@@ -130,13 +147,14 @@ int main( int argc, char *argv[] )
 
         MPI_Finalize();
         return 0;
-    } else {
+    } 
+    else {
         printf("I am worker %d on %s and ready to receive work from master ...\n", myid, hostname);
 
         // receive information from master to perform computation locally
         MPI_Recv(&maxiter, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
         MPI_Recv(&columns, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
-        rows = columns;
+        MPI_Recv(&rows, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
 
         // allocate memory for worker
         double * u     = calloc( sizeof(double),rows*columns );
@@ -167,6 +185,9 @@ int main( int argc, char *argv[] )
         }
 
         fprintf(stdout, "Process %d finished computing after %d iterations with residual value = %f\n", myid, iter, residual);
+
+        MPI_Request req;
+        MPI_Isend(&u[0], rows*columns, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD, &req);
 
         MPI_Finalize();
         return 0;
