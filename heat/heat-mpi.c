@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "heat.h"
-#include <mpi.h>
 
 void usage( char *s )
 {
@@ -83,6 +82,7 @@ int main( int argc, char *argv[] )
         // full size (param.resolution are only the inner points)
         columns = param.resolution + 2;
         rows = columns;
+        int local_rank = distribute_rows(0, numprocs, param.resolution) + 2;
 
 
         // starting time
@@ -98,19 +98,32 @@ int main( int argc, char *argv[] )
                 MPI_Send(&param.uhelp[i * sent_rows], sent_rows*columns, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
         }
         iter = 0;
+
         while(1) {
-            residual = relax_jacobi(param.u, param.uhelp, rows, columns);
-            // Copy uhelp into u
+            residual = relax_jacobi(param.u, param.uhelp, local_rank, columns, myid, numprocs);
+            // Copy uhelp into u, uhelp contains solver result
             double * tmp = param.u; param.u = param.uhelp; param.uhelp = tmp;
 
             iter++;
 
+            /*
+            MPI_Request residual_req;
+            double residual_reduced;
+            MPI_Allreduce(&residual, &residual_reduced, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+*/
+
+            /*
+            int err = MPI_Wait(&row_req, MPI_STATUS_IGNORE);
+            if (err)
+                printf("wait proc 0 err %d\n", err);
+                */
             // solution good enough ?
-            // if (residual < 0.00005) break;
+            //if (residual < 0.00005) break;
 
             // max. iteration reached ? (no limit with maxiter=0)
             if (maxiter>0 && iter>=maxiter) break;
         }
+
         // receive information
         MPI_Request merge_req[numprocs-1];
         for (int i = 1; i < numprocs; i++) {
@@ -119,10 +132,9 @@ int main( int argc, char *argv[] )
             MPI_Irecv(&param.u[i * sent_rows], sent_rows * columns, MPI_DOUBLE, i, 1, MPI_COMM_WORLD, &merge_req[i-1]);
         }
 
-        for (int i = 0; i < numprocs - 1; i++)
+        for (int i = 0; i < numprocs - 1; i++) {
             MPI_Wait(&merge_req[i], MPI_STATUS_IGNORE);
-
-
+        }
 
 
         // stopping time
@@ -171,14 +183,31 @@ int main( int argc, char *argv[] )
 
         iter = 0;
         while(1) {
-            residual = relax_jacobi(u, uhelp, rows, columns);
+            residual = relax_jacobi(u, uhelp, rows, columns, myid, numprocs);
             // Copy uhelp into u
             double * tmp = u; u = uhelp; uhelp = tmp;
 
             iter++;
 
+            /*
+            MPI_Request row_send_req, row_recv_req;
+            if (myid < numprocs - 1) {
+                MPI_Isend(&u[rows - 2], columns, MPI_DOUBLE, myid + 1, 2, MPI_COMM_WORLD, &row_send_req);
+            }
+                MPI_Irecv(&u[0], columns, MPI_DOUBLE, myid - 1, 2, MPI_COMM_WORLD, &row_recv_req);
+
+            int err;
+            err = MPI_Wait(&row_recv_req, MPI_STATUS_IGNORE);
+            if (err)
+                printf("wait proc %d err %d\n", myid, err);
+            err = MPI_Wait(&row_send_req, MPI_STATUS_IGNORE);
+            if (err)
+                printf("wait proc %d err %d\n", myid, err);
+                */
+
+
             // solution good enough ?
-            // if (residual < 0.00005) break;
+            //if (residual < 0.00005) break;
 
             // max. iteration reached ? (no limit with maxiter=0)
             if (maxiter>0 && iter>=maxiter) break;

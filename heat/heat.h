@@ -5,6 +5,7 @@
  */
 
 #include <stdio.h>
+#include <mpi.h>
 
 // configuration
 
@@ -49,7 +50,9 @@ void copy_mat ( double *u, double *v, unsigned sizex, unsigned sizey );
 
 double relax_gauss( double *u, unsigned sizex, unsigned sizey );
 
-double relax_jacobi( double *u, double *utmp, unsigned sizex, unsigned sizey );
+double relax_jacobi_orig ( double *u, double *utmp, unsigned sizex, unsigned sizey );
+
+double relax_jacobi( double *u, double *utmp, unsigned sizex, unsigned sizey, int mpi_id, int mpi_size);
 
 #define lowerb(id, p, n)  ( id * (n/p) + (id < (n%p) ? id : n%p) )
 #define numElem(id, p, n) ( (n/p) + (id < (n%p)) )
