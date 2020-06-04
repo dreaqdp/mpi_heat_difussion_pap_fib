@@ -20,13 +20,24 @@ double relax_jacobi (double *u, double *utmp, unsigned sizex, unsigned sizey, in
         }
     }
 
+    /*
+    if (mpi_id == 1) {
+    //    for( int i=1; i<sizex-1; i++ ) {
+            for( int j=1; j<sizey-1; j++ ) {
+                fprintf(stdout, "%f ", utmp[1*sizey + j]);
+            }
+            fprintf(stdout,"\n");
+     //   }
+    }
+    */
     // mpi sharing rows for next iteration
 
     MPI_Request row_send_req[2];
     MPI_Request row_recv_req[2];
 
-    if (mpi_id < mpi_size - 1) {
-        MPI_Isend(&utmp[sizex - 2], sizey, MPI_DOUBLE, mpi_id + 1, 3, MPI_COMM_WORLD, &row_send_req[1]);
+    if (mpi_id < (mpi_size - 1)) {
+        MPI_Isend(&utmp[(sizex - 2) * sizey], sizey, MPI_DOUBLE, mpi_id + 1, 3, MPI_COMM_WORLD, &row_send_req[1]);
+        /*
         if (mpi_id == 1) {
             fprintf(stdout, "Process %d fila -1 abans:\n", mpi_id);
             for(int i = 0; i < sizey; i++) {
@@ -34,11 +45,12 @@ double relax_jacobi (double *u, double *utmp, unsigned sizex, unsigned sizey, in
             }
             fprintf(stdout, "\n");
         }
-        MPI_Irecv(&utmp[sizex - 1], sizey, MPI_DOUBLE, mpi_id + 1, 2, MPI_COMM_WORLD, &row_recv_req[1]);
+        */
+        MPI_Irecv(&utmp[(sizex - 1) * sizey], sizey, MPI_DOUBLE, mpi_id + 1, 2, MPI_COMM_WORLD, &row_recv_req[1]);
     }
     if (mpi_id) {
         MPI_Irecv(&utmp[0], sizey, MPI_DOUBLE, mpi_id - 1, 3, MPI_COMM_WORLD, &row_recv_req[0]);
-        MPI_Isend(&utmp[1], sizey, MPI_DOUBLE, mpi_id - 1, 2, MPI_COMM_WORLD, &row_send_req[0]);
+        MPI_Isend(&utmp[1*sizey], sizey, MPI_DOUBLE, mpi_id - 1, 2, MPI_COMM_WORLD, &row_send_req[0]);
     }
 
     if (mpi_id < mpi_size - 1) {
@@ -49,6 +61,7 @@ double relax_jacobi (double *u, double *utmp, unsigned sizex, unsigned sizey, in
         MPI_Wait(&row_send_req[0], MPI_STATUS_IGNORE);
         MPI_Wait(&row_recv_req[0], MPI_STATUS_IGNORE);
     }
+    /*
     if (mpi_id == 1) {
         fprintf(stdout, "Process %d fila -1 despres:\n", mpi_id);
         for(int i = 0; i < sizey; i++) {
@@ -56,7 +69,17 @@ double relax_jacobi (double *u, double *utmp, unsigned sizex, unsigned sizey, in
         }
         fprintf(stdout, "\n");
     }
-
+    */
+/*
+    if (mpi_id == 1) {
+    //    for( int i=1; i<sizex-1; i++ ) {
+            for( int j=1; j<sizey-1; j++ ) {
+                fprintf(stdout, "%f ", utmp[1*sizey + j]);
+            }
+            fprintf(stdout,"\n");
+     //   }
+    }
+    */
     // mpi sharing sum result to decide if to continue computing
 
     double sum_reduced = sum;

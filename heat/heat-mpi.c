@@ -12,7 +12,7 @@ void usage( char *s )
 }
 
 int distribute_rows (int mpi_id, int mpi_ranks, int rows) {
-    return (rows/mpi_ranks) * ((rows % mpi_ranks) > mpi_id);
+    return (rows/mpi_ranks) + ((rows % mpi_ranks) > mpi_id);
 }
 
 int main( int argc, char *argv[] )
@@ -91,11 +91,12 @@ int main( int argc, char *argv[] )
         // send to workers the necessary information to perform computation
         for (int i=1; i<numprocs; i++) {
                 int sent_rows = distribute_rows(i, numprocs, param.resolution) + 2;
+        //fprintf(stdout, "index %d \n", i*(sent_rows-3));
                 MPI_Send(&maxiter, 1, MPI_INT, i, 0, MPI_COMM_WORLD); // broadcast?
                 MPI_Send(&columns, 1, MPI_INT, i, 0, MPI_COMM_WORLD); // broadcast?
                 MPI_Send(&sent_rows, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
-                MPI_Send(&param.u[i * sent_rows], sent_rows*columns, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
-                MPI_Send(&param.uhelp[i * sent_rows], sent_rows*columns, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
+                MPI_Send(&param.u[i * (sent_rows - 2) * columns], sent_rows*columns, MPI_DOUBLE, i, 5, MPI_COMM_WORLD);
+                MPI_Send(&param.uhelp[i * (sent_rows - 2) *columns], sent_rows*columns, MPI_DOUBLE, i, 6, MPI_COMM_WORLD);
         }
         iter = 0;
 
@@ -105,36 +106,22 @@ int main( int argc, char *argv[] )
             double * tmp = param.u; param.u = param.uhelp; param.uhelp = tmp;
 
             iter++;
-
-            /*
-            MPI_Request residual_req;
-            double residual_reduced;
-            MPI_Allreduce(&residual, &residual_reduced, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-*/
-
-            /*
-            int err = MPI_Wait(&row_req, MPI_STATUS_IGNORE);
-            if (err)
-                printf("wait proc 0 err %d\n", err);
-                */
+            
             // solution good enough ?
-            //if (residual < 0.00005) break;
+            if (residual < 0.00005) break;
 
             // max. iteration reached ? (no limit with maxiter=0)
             if (maxiter>0 && iter>=maxiter) break;
         }
 
         // receive information
-        MPI_Request merge_req[numprocs-1];
         for (int i = 1; i < numprocs; i++) {
-            int sent_rows = distribute_rows(i, numprocs, param.resolution) + 2;
+            int sent_rows = distribute_rows(i, numprocs, param.resolution);
 
-            MPI_Irecv(&param.u[i * sent_rows], sent_rows * columns, MPI_DOUBLE, i, 1, MPI_COMM_WORLD, &merge_req[i-1]);
+        fprintf(stdout, "index %d del proc %d\n", i*sent_rows, myid);
+            MPI_Recv(&param.u[i * sent_rows * columns], sent_rows * columns, MPI_DOUBLE, i, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
 
-        for (int i = 0; i < numprocs - 1; i++) {
-            MPI_Wait(&merge_req[i], MPI_STATUS_IGNORE);
-        }
 
 
         // stopping time
@@ -178,9 +165,10 @@ int main( int argc, char *argv[] )
         }
 
         // fill initial values for matrix with values received from master
-        MPI_Recv(&u[0], rows*columns, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &status);
-        MPI_Recv(&uhelp[0], rows*columns, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &status);
+        MPI_Recv(&u[0], rows*columns, MPI_DOUBLE, 0, 5, MPI_COMM_WORLD, &status);
+        MPI_Recv(&uhelp[0], rows*columns, MPI_DOUBLE, 0, 6, MPI_COMM_WORLD, &status);
 
+        //fprintf(stdout, "PROC %d; columns: %d, rows:%d\n", myid, columns, rows);
         iter = 0;
         while(1) {
             residual = relax_jacobi(u, uhelp, rows, columns, myid, numprocs);
@@ -189,25 +177,9 @@ int main( int argc, char *argv[] )
 
             iter++;
 
-            /*
-            MPI_Request row_send_req, row_recv_req;
-            if (myid < numprocs - 1) {
-                MPI_Isend(&u[rows - 2], columns, MPI_DOUBLE, myid + 1, 2, MPI_COMM_WORLD, &row_send_req);
-            }
-                MPI_Irecv(&u[0], columns, MPI_DOUBLE, myid - 1, 2, MPI_COMM_WORLD, &row_recv_req);
-
-            int err;
-            err = MPI_Wait(&row_recv_req, MPI_STATUS_IGNORE);
-            if (err)
-                printf("wait proc %d err %d\n", myid, err);
-            err = MPI_Wait(&row_send_req, MPI_STATUS_IGNORE);
-            if (err)
-                printf("wait proc %d err %d\n", myid, err);
-                */
-
 
             // solution good enough ?
-            //if (residual < 0.00005) break;
+            if (residual < 0.00005) break;
 
             // max. iteration reached ? (no limit with maxiter=0)
             if (maxiter>0 && iter>=maxiter) break;
@@ -215,8 +187,16 @@ int main( int argc, char *argv[] )
 
         fprintf(stdout, "Process %d finished computing after %d iterations with residual value = %f\n", myid, iter, residual);
 
-        MPI_Request req;
-        MPI_Isend(&u[0], rows*columns, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD, &req);
+        fprintf(stdout, "PROC %d; index %d\n", myid, 1*columns);
+    if (myid == 1) {
+    //    for( int i=1; i<sizex-1; i++ ) {
+            for( int j=1; j<columns-1; j++ ) {
+                fprintf(stdout, "%f ", u[1*columns + j]);
+            }
+            fprintf(stdout,"\n");
+     //   }
+    }
+        MPI_Send(&u[1*columns], (rows - 2)*columns, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
 
         MPI_Finalize();
         return 0;
